@@ -15,6 +15,7 @@ Known limitations:
 to see the replayed data, a live Aerofly FS4 session in flight must be active (or spoofed via UDP packet)
 need to remove the garish warning stripe around the log data button
 Airplane info must be entered manually in the first line of the CSV file (see example) for traffic to show the ICAO and flight number
+
 Usage:
 
 ```
