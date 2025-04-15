@@ -753,7 +753,7 @@ class AircraftTrackerApp:
         self.master.destroy()
 
 if __name__ == "__main__":
-    print("Starting Aircraft Tracker / Rewinger...")
+    print("Starting Aircraft Tracker...")
     print(f"Listening for UDP data on port {UDP_PORT}...")
     root = tk.Tk()
     app = AircraftTrackerApp(root)
