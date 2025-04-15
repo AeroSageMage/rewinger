@@ -2,8 +2,19 @@
 # This software is released under the MIT License.
 # https://opensource.org/licenses/MIT
 import csv
+
+# Helper function to determine if a string represents a numeric value
+def is_numeric(value):
+    try:
+        float(value)
+        return True
+    except ValueError:
+        return False    
     
+ 
 def extract_gps_from_csv(file_name):
+    icao_address = "UNKNOWN"  # Default values in case they're not provided
+    callsign = "UNKNOWN"   
     with open(file_name, "r") as f: # Open output.csv for reading in text mode (not binary)
         mylist = csv.reader(f, skipinitialspace=True) # Create a CSV reader object with leading whitespace skipped
         gps_att_time_data= []  # Initialize lists to store data from each row of the file
@@ -14,9 +25,18 @@ def extract_gps_from_csv(file_name):
             
             if first_line:
                 print(i)
-                icao_address = i[0]
-                callsign = i[1]
-                first_line = False
+                # Check if first line contains only identification data (2 strings)
+                # We can verify this by checking if there are exactly 2 items
+                # and if they don't look like numeric values (longitude/latitude)
+                if len(i) == 2 and not is_numeric(i[0]) and not is_numeric(i[1]):
+                    icao_address = i[0]
+                    callsign = i[1]
+                    first_line = False
+                    continue  # Skip to next row as this one doesn't contain GPS data
+                else:
+                    # This is actually a data row, not identification
+                    first_line = False
+                    # Process as normal GPS data (fall through to the data extraction code)
             else:
                 GPS_CSV, ATT_CSV, time_stamp = i[0],i[1],i[2] # Extract GPS longitude and latitude from first column of row using split() function on the string with commas as delimiter
                 dirty_longitude, latitude, altitude, track,dirty_ground_speed = GPS_CSV.split(",")

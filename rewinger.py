@@ -1,7 +1,7 @@
 # Copyright (c) 2024 Juan Luis Gabriel
 # Modifications Copyright (c) 2025 Emanuele Bettoni
 # This software is released under the MIT License.
-# https://opensource.org/licenses/MIT
+# https://opensource.org/licenses/MIT‚‚
 
 """Aircraft Tracker
 
@@ -11,7 +11,7 @@ and enhance the overall simulation experience. Key features include:
 
 - Receives UDP data from Aerofly FS4 (C) flight simulator
 - Displays the aircraft's position on a customizable map interface
-- Shows real-time flight information including latitude, longitude, altitude, ground speed, heading, pitch, and roll
+- Shows real-time flight information including latitude, longitude, altitude, ground speed, heading, pitch, and roll‚‚
 - Allows users to switch between different map styles
 - Updates the aircraft's position and orientation in real-time
 - Provides a user-friendly GUI for easy interaction
@@ -22,9 +22,16 @@ Version 25: Added a connection status label and improved error handling for UDP 
 Modifications by Emanuele Bettoni in Rewinger:
 - allowing to save a CSV with the recorded data from the flight on output_recorder
 - filters the initial position (0,0) from Aerofly FS4
-- data can be replayed via Send_GPS_data_2.py output_GPS_data.csv
-Known limitations:
-- to see the replayed data, a live Aerofly FS4 session in flight must be active (or spoofed via UDP packet)
+- data can be replayed via Send_GPS_data.py output_GPS_data.csv
+- added "follow aircraft" toggle
+- added "arm" the recorder
+
+Rewinger Version 2:
+- cleaned the graphical interface
+- added the capability to "arm" the recorder, that means: will wait until there's GPS UDP packets incoming and then starts recording
+- added the "follow aircraft" toggle - without, the map does not move with the main aircraft
+- Main aircraft is named "Aerofly FS4"
+- corrected the known limitation that needed a live GPS stream to work with traffic
 
 """
 
@@ -47,7 +54,7 @@ CONTROL_FRAME_WIDTH = 200
 INFO_DISPLAY_SIZE = (24, 9)
 UPDATE_INTERVAL = 1000  # milliseconds
 RECEIVE_TIMEOUT = 5.0  # seconds
-import csv
+
 
 @dataclass
 class GPSData:
@@ -105,6 +112,8 @@ class UDPReceiver:
         self.receive_thread: Optional[threading.Thread] = None
         self.last_receive_time: float = 0
         self.log_to_csv: bool = False
+        self.armed_for_recording: bool = False
+        self.csv_files = {}
 
     def start_receiving(self) -> None:
         """Initialize and start the UDP receiving thread."""
@@ -135,6 +144,23 @@ class UDPReceiver:
                     if traffic_data:
                         # Store with current timestamp
                         self.traffic_data[traffic_data.icao_address] = (traffic_data, time.time())
+                        
+                # Check if we need to start logging after arming
+                if self.armed_for_recording and (self.latest_gps_data or len(self.traffic_data) > 0):
+                    self.armed_for_recording = False
+                    self.log_to_csv = True
+                    print("Recording automatically started after arming")
+                    # Initialize CSV files
+                    timestamp = time.strftime("%Y%m%d-%H%M%S")
+                    self.csv_files = {
+                        'gps': open(f"output_GPS_DATA_{timestamp}.csv", "w", newline=''),
+                        'attitude': open(f"output_ATTITUDE_DATA_{timestamp}.csv", "w", newline=''),
+                        'traffic': open(f"output_TRAFFIC_DATA_{timestamp}.csv", "w", newline='')
+                    }
+                    # Write headers
+                    csv.writer(self.csv_files['gps']).writerow(['Timestamp', 'Latitude', 'Longitude', 'Altitude', 'Track', 'Ground_Speed'])
+                    csv.writer(self.csv_files['attitude']).writerow(['Timestamp', 'True_Heading', 'Pitch', 'Roll'])
+                    csv.writer(self.csv_files['traffic']).writerow(['Timestamp', 'ICAO', 'Latitude', 'Longitude', 'Altitude_ft', 'VS_ft_min', 'Airborne', 'Heading', 'Velocity_kts', 'Callsign'])
             except socket.timeout:
                 # This is expected, just continue the loop
                 pass
@@ -142,39 +168,40 @@ class UDPReceiver:
                 print(f"Error receiving data: {e}")
     @staticmethod
     def _parse_gps_data(message: str) -> Optional[GPSData]:
-            """Parse GPS data from the received message."""
-            pattern = r'XGPSAerofly FS 4,([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)'
-            match = re.match(pattern, message)
-            #print(match)
-            if match:
-                # Extract the values
-                latitude, longitude, altitude, track, ground_speed = map(float, match.groups())
-                
-                # Check for the specific "menu state" condition
-                if (latitude == 0.0 and longitude == 0.0 and 
-                    altitude == 0.0 and track == 90.0 and ground_speed == 0.0):
-                    # This is the menu state - return None instead
-                    return None
-                    
-                # Otherwise return the valid GPS data
-                return GPSData(*map(float, match.groups()))
+        """Parse GPS data from the received message."""
+        pattern = r'XGPSAerofly FS 4,([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)'
+        match = re.match(pattern, message)
+        #print(match)
+        if match:
+            #print("Received GPS DATA")
+            latitude, longitude, altitude, track, ground_speed = map(float, match.groups())
             
-            return None
-
+            # Check for the specific "menu state" condition
+            if (latitude == 0.0 and longitude == 0.0 and 
+                altitude == 0.0 and track == 90.0 and ground_speed == 0.0):
+                # This is the menu state - return None instead
+                return None
+                
+            # Otherwise return the valid GPS data
+            return GPSData(*map(float, match.groups()))
+        
+        return None
     @staticmethod
     def _parse_attitude_data(message: str) -> Optional[AttitudeData]:
         """Parse attitude data from the received message."""
         pattern = r'XATTAerofly FS 4,([-\d.]+),([-\d.]+),([-\d.]+)'
         match = re.match(pattern, message)
         if match:
+            #print("Received ATTITUDE DATA")
             return AttitudeData(*map(float, match.groups()))
         return None
     @staticmethod
     def _parse_aircraft_data(message: str) -> Optional[AircraftData]:
         """Parse Aircraft data from the received message."""
-        pattern = r'^XSageMage,([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+)'
+        pattern = r'^XRewinger,([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+)'
         match = re.match(pattern, message)
         if match:
+            #print("Received Aircraft Data")
             return AircraftData(*map(str, match.groups()))
         return None
     @staticmethod
@@ -183,7 +210,9 @@ class UDPReceiver:
         pattern = r'^XTRAFFICAerofly FS 4,([A-Za-z0-9\-_]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([01]),'\
                 r'([-\d.]+),([-\d.]+),([A-Za-z0-9\-_]+)'
         match = re.match(pattern, message)
+        #print(message)
         if match:
+            #print("Received TRAFFFIC DATA")
             groups = match.groups()
             #print(groups)
             # Convert strings to appropriate data types
@@ -202,9 +231,36 @@ class UDPReceiver:
 
     def set_csv_logging(self, enabled: bool) -> None:
         """Enable or disable CSV logging."""
+        # If we're turning off logging, close any open files
+        if self.log_to_csv and not enabled:
+            for file in self.csv_files.values():
+                file.close()
+            self.csv_files = {}
+            
         self.log_to_csv = enabled
+        self.armed_for_recording = False
+        
+        # If we're turning on logging, initialize new CSV files
+        if enabled:
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            self.csv_files = {
+                'gps': open(f"output_GPS_DATA_{timestamp}.csv", "w", newline=''),
+                'attitude': open(f"output_ATTITUDE_DATA_{timestamp}.csv", "w", newline=''),
+                'traffic': open(f"output_TRAFFIC_DATA_{timestamp}.csv", "w", newline='')
+            }
+            # Write headers
+            csv.writer(self.csv_files['gps']).writerow(['Timestamp', 'Latitude', 'Longitude', 'Altitude', 'Track', 'Ground_Speed'])
+            csv.writer(self.csv_files['attitude']).writerow(['Timestamp', 'True_Heading', 'Pitch', 'Roll'])
+            csv.writer(self.csv_files['traffic']).writerow(['Timestamp', 'ICAO', 'Latitude', 'Longitude', 'Altitude_ft', 'VS_ft_min', 'Airborne', 'Heading', 'Velocity_kts', 'Callsign'])
+        
         status = "enabled" if enabled else "disabled"
         print(f"CSV logging {status}")
+        
+    def arm_recording(self) -> None:
+        """Arm the recording system to start when data is received."""
+        self.armed_for_recording = True
+        self.log_to_csv = False
+        print("Recording armed and waiting for data")
 
     def get_latest_data(self) -> Dict[str, Any]:
         """Return the latest received GPS and attitude data."""
@@ -224,10 +280,10 @@ class UDPReceiver:
                     writer = csv.writer(f)
                     writer.writerow([self.latest_gps_data, self.latest_attitude_data, time.time()])
             
-            if self.latest_attitude_data:
-                with open("output_recorder/output_ATTITUDE_DATA.csv", "a") as f:
-                    writer = csv.writer(f)
-                    writer.writerow([self.latest_attitude_data, time.time()])
+            #if self.latest_attitude_data:
+            #    with open("output_recorder/output_ATTITUDE_DATA.csv", "a") as f:
+            #        writer = csv.writer(f)
+            #        writer.writerow([self.latest_attitude_data, time.time()])
         
         return {
             'gps': self.latest_gps_data,
@@ -244,6 +300,11 @@ class UDPReceiver:
             self.receive_thread.join()
         if self.socket:
             self.socket.close()
+        
+        # Close any open CSV files
+        if self.csv_files:
+            for file in self.csv_files.values():
+                file.close()
 
 class AircraftTrackerApp:
     """
@@ -263,6 +324,9 @@ class AircraftTrackerApp:
         # Setup a different icon for traffic
         self.traffic_image = Image.open("traffic_icon.png").resize((24, 24))
         self.update_aircraft_position()
+        # Variables to track map center mode
+        self.follow_aircraft = True
+        self.map_center = None
 
     def setup_ui(self):
         """Set up the main user interface components."""
@@ -284,8 +348,11 @@ class AircraftTrackerApp:
         self.connection_status = tk.Label(self.control_frame, text="Disconnected", fg="red")
         self.connection_status.pack(pady=5)
 
-        # Add CSV logging toggle
-        self.setup_csv_logging_toggle()
+        # Add recording controls
+        self.setup_recording_controls()
+
+        # Add map control toggle
+        self.setup_map_control()
 
         # Add a close button
         self.close_button = tk.Button(self.control_frame, text="Close Map", command=self.close_application)
@@ -294,106 +361,157 @@ class AircraftTrackerApp:
         # Set up the window close protocol
         self.master.protocol("WM_DELETE_WINDOW", self.close_application)
 
-    def setup_csv_logging_toggle(self):
-        """Set up the CSV logging toggle with an airplane-style illuminated button with angled stripes."""
-        # Create a frame for CSV logging controls
-        csv_frame = tk.Frame(self.control_frame)
-        csv_frame.pack(pady=10, fill="x")
+    def setup_map_control(self):
+        """Set up controls for map centering behavior."""
+        map_control_frame = tk.Frame(self.control_frame)
+        map_control_frame.pack(pady=5, fill="x")
         
-        # Create outer frame to contain the stripe canvas
-        outer_frame = tk.Frame(csv_frame, borderwidth=0, relief=tk.RAISED)
-        outer_frame.pack(side="left", padx=10)
-        
-        # Create a canvas for the angled warning stripes
-        canvas_width, canvas_height = 130, 70
-        background_color = self.master.cget("background")  # Get the parent window's background color
-        stripe_canvas = tk.Canvas(outer_frame, width=canvas_width, height=canvas_height, 
-                         highlightthickness=0, bg=background_color)
-
-        stripe_canvas.pack()
-        
-        # Draw angled yellow/black warning stripes
-        stripe_width = 10
-        angle = 45  # 45-degree angle
-        num_stripes = 20  # More stripes needed to cover the area with angled lines
-        
-        # Calculate diagonal length to ensure stripes cover the entire canvas
-        diagonal_length = (canvas_width**2 + canvas_height**2)**0.5 + stripe_width*2
-        offset = -diagonal_length / 2  # Start outside the canvas
-        
-        for i in range(0, num_stripes, 2):  # Only draw every other stripe (just the yellow ones)
-            x_offset = offset + i * stripe_width
-            
-            # Create only the yellow stripes
-            stripe_canvas.create_polygon(
-                x_offset, 0,
-                x_offset + stripe_width, 0,
-                x_offset + stripe_width + canvas_height, canvas_height,
-                x_offset + canvas_height, canvas_height,
-                fill="yellow", outline=""
-            )
-        
-        # Create a variable to track button state
-        self.csv_logging_var = tk.BooleanVar(value=False)
-        
-        # Create a center frame for the button that will be placed over the stripes
-        button_frame = tk.Frame(stripe_canvas, borderwidth=0, relief=tk.RAISED, bg="dark gray")
-        button_window = stripe_canvas.create_window(canvas_width/2, canvas_height/2, window=button_frame)
-        
-        # Create the illuminated button
-        self.csv_logging_button = tk.Button(
-            button_frame,
-            text="LOG DATA",
-            font=("Arial", 10, "bold"),
-            bg="gray25",  # Default state is off (darker gray)
-            fg="white",
-            activebackground="gray40",
-            activeforeground="white",
-            relief=tk.RAISED,
-            borderwidth=0,
-            width=8,
-            height=1,
-            command=self.toggle_csv_logging
+        self.follow_var = tk.BooleanVar(value=True)
+        self.follow_checkbox = tk.Checkbutton(
+            map_control_frame, 
+            text="Follow Aircraft", 
+            variable=self.follow_var,
+            command=self.toggle_follow_mode
         )
-        self.csv_logging_button.pack(padx=2, pady=2)
+        self.follow_checkbox.pack(side="left", padx=5)
+        
+    def toggle_follow_mode(self):
+        """Toggle whether the map should automatically follow the aircraft."""
+        self.follow_aircraft = self.follow_var.get()
+        if not self.follow_aircraft:
+            # Store current map center when disabling follow mode
+            current_pos = self.map_widget.get_position()
+            self.map_center = (current_pos[0], current_pos[1])
+            print(f"Follow mode disabled. Map center fixed at: {self.map_center}")
+        else:
+        # When re-enabling follow mode, if we have GPS data, immediately center on aircraft
+            if self.udp_receiver.latest_gps_data:
+                gps = self.udp_receiver.latest_gps_data
+                self.map_widget.set_position(gps.latitude, gps.longitude)
+                print("Follow mode enabled. Centering on aircraft.")    
+    def setup_recording_controls(self):
+        """Set up modern recording controls."""
+        # Create a frame for recording controls
+        recording_frame = tk.Frame(self.control_frame)
+        recording_frame.pack(pady=10, fill="x")
+        
+        # Create variables to track button states
+        self.record_var = tk.BooleanVar(value=False)
+        self.armed_var = tk.BooleanVar(value=False)
+        
+        # Create a styled frame for buttons
+        button_frame = tk.Frame(recording_frame, relief=tk.GROOVE, bd=2)
+        button_frame.pack(pady=5, padx=10, fill="x")
+        
+        # Title label
+        tk.Label(button_frame, text="Recording Controls", font=("Arial", 10, "bold")).pack(pady=(5,2))
+        
+        # Create the arming button
+        self.arm_button = tk.Button(
+            button_frame,
+            text="ARM RECORDING",
+            font=("Arial", 9),
+            bg="#ff9900",  # Orange for armed state
+            fg="black",
+            activebackground="#ffcc00",
+            relief=tk.RAISED,
+            command=self.toggle_arm_recording,
+            width=15
+        )
+        self.arm_button.pack(pady=3, padx=10)
+        
+        # Create the record button
+        self.record_button = tk.Button(
+            button_frame,
+            text="START RECORDING",
+            font=("Arial", 9),
+            bg="#cccccc",  # Gray when not active
+            fg="black",
+            activebackground="#dddddd",
+            relief=tk.RAISED,
+            command=self.toggle_csv_logging,
+            width=15
+        )
+        self.record_button.pack(pady=3, padx=10)
         
         # Create a status label
-        self.csv_status = tk.Label(
-            csv_frame, 
-            text="CSV Logging: OFF", 
-            fg="red",
-            font=("Arial", 10, "bold")
+        self.recording_status = tk.Label(
+            button_frame, 
+            text="Status: Ready",
+            font=("Arial", 9)
         )
-        self.csv_status.pack(side="left", padx=10)
+        self.recording_status.pack(pady=5)
+
+    def toggle_arm_recording(self):
+        """Toggle the armed state for recording."""
+        is_armed = not self.armed_var.get()
+        self.armed_var.set(is_armed)
+        
+        # Update UI
+        if is_armed:
+            self.arm_button.config(
+                bg="#ff9900",  # Orange
+                text="ARMED",
+                relief=tk.SUNKEN
+            )
+            self.record_button.config(
+                bg="#cccccc",  # Gray
+                text="START RECORDING",
+                relief=tk.RAISED,
+                state=tk.DISABLED
+            )
+            self.recording_status.config(text="Status: Armed for Recording", fg="orange")
+            self.record_var.set(False)
+            
+            # Tell the UDP receiver to arm for recording
+            self.udp_receiver.arm_recording()
+        else:
+            self.arm_button.config(
+                bg="#dddddd",  # Light gray
+                text="ARM RECORDING",
+                relief=tk.RAISED
+            )
+            self.record_button.config(
+                state=tk.NORMAL
+            )
+            self.recording_status.config(text="Status: Ready", fg="black")
+            
+            # Disarm recording
+            self.udp_receiver.armed_for_recording = False
 
     def toggle_csv_logging(self):
         """Toggle CSV logging on or off and update button appearance."""
+        # Don't allow toggling if armed
+        if self.armed_var.get():
+            return
+            
         # Toggle the state
-        is_logging = not self.csv_logging_var.get()
-        self.csv_logging_var.set(is_logging)
+        is_logging = not self.record_var.get()
+        self.record_var.set(is_logging)
+        
+        # Update buttons
+        if is_logging:
+            # Recording state
+            self.record_button.config(
+                bg="#ff3333",  # Red when recording
+                text="STOP RECORDING",
+                relief=tk.SUNKEN
+            )
+            self.arm_button.config(state=tk.DISABLED)
+            self.recording_status.config(text="Status: Recording", fg="#ff3333")
+        else:
+            # Off state
+            self.record_button.config(
+                bg="#dddddd",  # Light gray
+                text="START RECORDING",
+                relief=tk.RAISED
+            )
+            self.arm_button.config(state=tk.NORMAL)
+            self.recording_status.config(text="Status: Ready", fg="black")
         
         # Set CSV logging
         self.udp_receiver.set_csv_logging(is_logging)
-        
-        # Update button appearance and status label
-        if is_logging:
-            # Illuminated state
-            self.csv_logging_button.config(
-                bg="#00ff00",  # Bright green when active
-                fg="black",
-                activebackground="#00cc00",
-                relief=tk.SUNKEN
-            )
-            self.csv_status.config(text="CSV Logging: ON", fg="green")
-        else:
-            # Off state
-            self.csv_logging_button.config(
-                bg="gray25",
-                fg="white",
-                activebackground="gray40",
-                relief=tk.RAISED
-            )
-            self.csv_status.config(text="CSV Logging: OFF", fg="red")
+
     def setup_map_selection(self):
         """Set up the map selection listbox."""
         tk.Label(self.control_frame, text="Select Map:").pack(pady=(10, 5))
@@ -401,7 +519,7 @@ class AircraftTrackerApp:
         listbox_frame = tk.Frame(self.control_frame)
         listbox_frame.pack(padx=0, pady=5)
 
-        self.map_listbox = tk.Listbox(listbox_frame, width=24, height=13)
+        self.map_listbox = tk.Listbox(listbox_frame, width=24, height=6)
         self.map_listbox.pack(side="left")
 
         for option, _ in self.get_map_options():
@@ -416,7 +534,7 @@ class AircraftTrackerApp:
         info_font = tkfont.Font(family="Consolas", size=9)
         self.info_display = tk.Text(self.control_frame, width=INFO_DISPLAY_SIZE[0], height=INFO_DISPLAY_SIZE[1],
                                     wrap=tk.NONE, font=info_font)
-        self.info_display.pack(padx=10, pady=10)
+        self.info_display.pack(padx=10, pady=5)
 
     def setup_aircraft_marker(self):
         """Set up the aircraft marker image and related variables."""
@@ -431,23 +549,67 @@ class AircraftTrackerApp:
         This method is called periodically to refresh the display.
         """
         data = self.udp_receiver.get_latest_data()
+        
+        # Check if we're connected to the simulator
         if data['connected']:
             self.connection_status.config(text="Connected", fg="green")
-            if data['gps'] and data['attitude'] or data['traffic']:
-                self.update_map_and_marker(data)
-                self.update_info_display(data)
+            
+            # Update traffic markers regardless of GPS data
+            if data['traffic']:
                 self.update_traffic_markers(data['traffic'])
+                
+                # If we haven't set an initial position and we have traffic,
+                # use the first traffic position to center the map
+                if not self.initial_position_set and self.follow_aircraft:
+                    first_traffic = next(iter(data['traffic'].values()))
+                    self.map_widget.set_position(first_traffic.latitude, first_traffic.longitude)
+                    self.map_widget.set_zoom(10)
+                    self.initial_position_set = True
+                    self.map_center = (first_traffic.latitude, first_traffic.longitude)
+            # If we have GPS data, update the aircraft marker and info display
+            if data['gps'] and data['attitude']:
+                self.update_aircraft_marker(data)
+                self.update_info_display(data)
         else:
             self.connection_status.config(text="Disconnected", fg="red")
             self.clear_info_display()
-            self.clear_traffic_markers()
+            
+            # Keep traffic markers even when disconnected (just don't add new ones)
+            # But clean up aircraft marker
+            if self.aircraft_marker:
+                self.aircraft_marker.delete()
+                self.aircraft_marker = None
 
+        # Check if armed recording should automatically start
+        if self.armed_var.get() and not self.udp_receiver.armed_for_recording:
+            # The UDPReceiver has detected data and auto-started recording
+            if self.udp_receiver.log_to_csv:
+                self.armed_var.set(False)
+                self.record_var.set(True)
+                self.arm_button.config(
+                    bg="#dddddd",  # Light gray
+                    text="ARM RECORDING",
+                    relief=tk.RAISED,
+                    state=tk.DISABLED
+                )
+                self.record_button.config(
+                    bg="#ff3333",  # Red when recording
+                    text="STOP RECORDING",
+                    relief=tk.SUNKEN
+                )
+                self.recording_status.config(text="Status: Recording", fg="#ff3333")
+            
         self.master.after(UPDATE_INTERVAL, self.update_aircraft_position)
 
     def clear_info_display(self):
         """Clear the information display when disconnected."""
         self.info_display.delete(1.0, tk.END)
-        self.info_display.insert(tk.END, "Waiting for data...")
+        self.info_display.insert(tk.END, "Waiting for aircraft data...\n")
+        
+        # Display traffic count if available
+        traffic_count = len(self.udp_receiver.traffic_data)
+        if traffic_count > 0:
+            self.info_display.insert(tk.END, f"Traffic detected: {traffic_count} aircraft")
 
     def update_traffic_markers(self, traffic_data):
         """Update the traffic markers on the map."""
@@ -480,14 +642,8 @@ class AircraftTrackerApp:
         """Rotate the traffic icon image by the given angle."""
         return ImageTk.PhotoImage(self.traffic_image.rotate(-angle))
 
-    def clear_traffic_markers(self):
-        """Remove all traffic markers from the map."""
-        for marker in self.traffic_markers.values():
-            marker.delete()
-        self.traffic_markers = {}
-
-    def update_map_and_marker(self, data: Dict[str, Any]):
-        """Update the map view and aircraft marker with the latest data."""
+    def update_aircraft_marker(self, data: Dict[str, Any]):
+        """Update just the aircraft marker with the latest data."""
         gps_data: GPSData = data['gps']
         attitude_data: AttitudeData = data['attitude']
         aircraft_data: AircraftData = data['aircraft']
@@ -496,11 +652,14 @@ class AircraftTrackerApp:
             self.map_widget.set_position(gps_data.latitude, gps_data.longitude)
             self.map_widget.set_zoom(10)
             self.initial_position_set = True
-
+            self.map_center = (gps_data.latitude, gps_data.longitude)
         self.rotated_image = self.rotate_image(attitude_data.true_heading)
 
+        # Update or create the aircraft marker
         if self.aircraft_marker:
             self.aircraft_marker.delete()
+            
+        # Create marker with appropriate text
         if aircraft_data is not None:
             self.aircraft_marker = self.map_widget.set_marker(
                 gps_data.latitude, gps_data.longitude,
@@ -513,20 +672,34 @@ class AircraftTrackerApp:
                 gps_data.latitude, gps_data.longitude,
                 icon=self.rotated_image,
                 icon_anchor="center",
-                text="NO DATA"
+                text="Aerofly FS 4"
             )
         
-        self.map_widget.set_position(gps_data.latitude, gps_data.longitude)
+        # Center map on aircraft if follow mode is enabled
+        if self.follow_aircraft:
+            self.map_widget.set_position(gps_data.latitude, gps_data.longitude)
+        #elif self.map_center:
+        #    # Stay on the fixed position when follow mode is disabled
+        #    self.map_widget.set_position(self.map_center[0], self.map_center[1])
 
     def update_info_display(self, data: Dict[str, Any]):
         """Update the information display with the latest aircraft data."""
         gps_data: GPSData = data['gps']
-        attitude_data: AttitudeData = data['attitude']
+        attitude_data: AttitudeData = data['attitude'] 
+        aircraft_data: AircraftData = data['aircraft']
 
         alt_ft = gps_data.altitude * 3.28084  # Convert meters to feet
         ground_speed_kts = gps_data.ground_speed * 1.94384  # Convert m/s to knots
 
         info_text = "=" * 24 + "\n"
+        
+        # Add aircraft data if available
+        if aircraft_data:
+            callsign = aircraft_data.callsign if aircraft_data.callsign else "N/A"
+            flight_num = aircraft_data.FlightNumber if aircraft_data.FlightNumber else "N/A"
+            info_text += f"{'Callsign:':<15}{callsign}\n"
+            info_text += f"{'Flight:':<15}{flight_num}\n"
+        
         info_text += f"{'Latitude:':<15}{gps_data.latitude:>8.2f}°\n"
         info_text += f"{'Longitude:':<15}{gps_data.longitude:>8.2f}°\n"
         info_text += f"{'Altitude:':<15}{alt_ft:>6.0f} ft\n"
@@ -534,7 +707,11 @@ class AircraftTrackerApp:
         info_text += f"{'True Heading:':<15}{attitude_data.true_heading:>8.2f}°\n"
         info_text += f"{'Pitch:':<15}{attitude_data.pitch:>8.2f}°\n"
         info_text += f"{'Roll:':<15}{attitude_data.roll:>8.2f}°\n"
+        
+        # Add traffic count
+        traffic_count = len(data['traffic'])
         info_text += "=" * 24 + "\n"
+        info_text += f"Traffic Count: {traffic_count}\n"
 
         self.info_display.delete(1.0, tk.END)
         self.info_display.insert(tk.END, info_text)
