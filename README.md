@@ -37,10 +37,15 @@ Rewinger Version 2:
 - Main aircraft is named "Aerofly FS4"
 - corrected the known limitation that needed a live GPS stream to work with traffic
 
+Rewinger Version 3:
+- added capability to load a Google Earth *.kml file for the flight plan (e.g. from SimBrief) 
+
 Usage:
 ```
 python3 rewinger.py
 ```
+if a recorder is activated, will be written into /output_recorder/
+The trace will be appended so after a flight rename it with a sensible name.
 
 Send GPS data with:
 ```

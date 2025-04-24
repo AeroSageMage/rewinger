@@ -1,54 +1,21 @@
-# Copyright (c) 2024 Juan Luis Gabriel
-# Modifications Copyright (c) 2025 Emanuele Bettoni
-# This software is released under the MIT License.
-# https://opensource.org/licenses/MIT‚‚
-
-"""Aircraft Tracker
-
-This program is an open source real-time aircraft tracker that visualizes Aerofly FS4 - (C) Copyright IPACS -
-flight simulator data on an interactive map. It can be used to track flights, analyze routes,
-and enhance the overall simulation experience. Key features include:
-
-- Receives UDP data from Aerofly FS4 (C) flight simulator
-- Displays the aircraft's position on a customizable map interface
-- Shows real-time flight information including latitude, longitude, altitude, ground speed, heading, pitch, and roll‚‚
-- Allows users to switch between different map styles
-- Updates the aircraft's position and orientation in real-time
-- Provides a user-friendly GUI for easy interaction
-
-Version 25: Added a connection status label and improved error handling for UDP data reception.
-
-:::REWINGER:::
-Modifications by Emanuele Bettoni in Rewinger:
-- allowing to save a CSV with the recorded data from the flight on output_recorder
-- filters the initial position (0,0) from Aerofly FS4
-- data can be replayed via Send_GPS_data.py output_GPS_data.csv
-- added "follow aircraft" toggle
-- added "arm" the recorder
-
-Rewinger Version 2:
-- cleaned the graphical interface
-- added the capability to "arm" the recorder, that means: will wait until there's GPS UDP packets incoming and then starts recording
-- added the "follow aircraft" toggle - without, the map does not move with the main aircraft
-- Main aircraft is named "Aerofly FS4"
-- corrected the known limitation that needed a live GPS stream to work with traffic
-
-"""
-
 import socket
 import threading
 import re
 import tkinter as tk
 from tkintermapview import TkinterMapView
 from tkinter import font as tkfont
+from tkinter import filedialog
 from PIL import Image, ImageTk
 from typing import Optional, Dict, Any, Tuple, List
 from dataclasses import dataclass
 import time
 import csv
+import xml.etree.ElementTree as ET
+import os
+
 # Constants
 UDP_PORT = 49002
-WINDOW_SIZE = "1000x600"
+WINDOW_SIZE = "1000x800"
 MAP_SIZE = (800, 600)
 CONTROL_FRAME_WIDTH = 200
 INFO_DISPLAY_SIZE = (24, 9)
@@ -115,6 +82,7 @@ class UDPReceiver:
         self.armed_for_recording: bool = False
         self.csv_files = {}
 
+
     def start_receiving(self) -> None:
         """Initialize and start the UDP receiving thread."""
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -137,7 +105,7 @@ class UDPReceiver:
                     self.latest_gps_data = self._parse_gps_data(message)
                 if message.startswith('XATT'):
                     self.latest_attitude_data = self._parse_attitude_data(message)
-                if message.startswith('XSageMage'):
+                if message.startswith('XAIRCRAFT'):
                     self.latest_aircraft_data = self._parse_aircraft_data(message)
                 if message.startswith('XTRAFFIC'):
                     traffic_data = self._parse_traffic_data(message)
@@ -198,7 +166,8 @@ class UDPReceiver:
     @staticmethod
     def _parse_aircraft_data(message: str) -> Optional[AircraftData]:
         """Parse Aircraft data from the received message."""
-        pattern = r'^XRewinger,([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+)'
+        #print(message)
+        pattern = r'^XAIRCRAFTAerofly FS 4,([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+)'
         match = re.match(pattern, message)
         if match:
             #print("Received Aircraft Data")
@@ -315,6 +284,12 @@ class AircraftTrackerApp:
         self.master = master
         self.master.title("Aircraft Tracker / Rewinger")
         self.master.geometry(WINDOW_SIZE)
+        
+        # Initialize flight plan related attributes
+        self.flight_plan_waypoints = []
+        self.flight_plan_path = None
+        self.current_kml_file = None
+        
         self.setup_ui()
         self.udp_receiver = UDPReceiver()
         self.udp_receiver.start_receiving()
@@ -350,6 +325,9 @@ class AircraftTrackerApp:
 
         # Add recording controls
         self.setup_recording_controls()
+        
+        # Add flight plan controls
+        self.setup_flightplan_controls()
 
         # Add map control toggle
         self.setup_map_control()
@@ -389,6 +367,152 @@ class AircraftTrackerApp:
                 gps = self.udp_receiver.latest_gps_data
                 self.map_widget.set_position(gps.latitude, gps.longitude)
                 print("Follow mode enabled. Centering on aircraft.")    
+
+    def setup_flightplan_controls(self):
+        """Set up flight plan loading and display controls."""
+        fp_frame = tk.Frame(self.control_frame, relief=tk.GROOVE, bd=2)
+        fp_frame.pack(pady=5, padx=10, fill="x")
+        
+        # Title label
+        tk.Label(fp_frame, text="Flight Plan", font=("Arial", 10, "bold")).pack(pady=(5,2))
+        
+        # Load button
+        self.load_kml_button = tk.Button(
+            fp_frame,
+            text="Load KML File",
+            font=("Arial", 9),
+            command=self.load_kml_file,
+            width=15
+        )
+        self.load_kml_button.pack(pady=3, padx=10)
+        
+        # Toggle display checkbox
+        self.show_flightplan_var = tk.BooleanVar(value=False)
+        self.show_flightplan_checkbox = tk.Checkbutton(
+            fp_frame, 
+            text="Show Flight Plan", 
+            variable=self.show_flightplan_var,
+            command=self.toggle_flight_plan_display
+        )
+        self.show_flightplan_checkbox.pack(pady=3)
+        
+        # Status label
+        self.flightplan_status = tk.Label(
+            fp_frame, 
+            text="No flight plan loaded",
+            font=("Arial", 9)
+        )
+        self.flightplan_status.pack(pady=3)
+
+    def load_kml_file(self):
+        """Open a file dialog to select and load a KML file."""
+        file_path = filedialog.askopenfilename(
+            title="Select SimBrief KML File",
+            filetypes=[("KML files", "*.kml"), ("All files", "*.*")]
+        )
+        
+        if file_path:
+            try:
+                # Store the file path
+                self.current_kml_file = file_path
+                
+                # Parse the KML file
+                self.flight_plan_waypoints = self.parse_kml_file(file_path)
+                
+                if self.flight_plan_waypoints:
+                    # Update status
+                    self.flightplan_status.config(
+                        text=f"Loaded: {os.path.basename(file_path)}",
+                        fg="green"
+                    )
+                    
+                    # Set the checkbox to checked and draw the flight plan
+                    self.show_flightplan_var.set(True)
+                    self.draw_flight_plan(self.flight_plan_waypoints)
+                else:
+                    self.flightplan_status.config(
+                        text="Error: No route found in KML",
+                        fg="red"
+                    )
+            except Exception as e:
+                self.flightplan_status.config(
+                    text=f"Error loading KML",
+                    fg="red"
+                )
+                print(f"Error loading KML file: {e}")
+
+    def parse_kml_file(self, kml_file_path):
+        """
+        Parse a KML file and extract flight plan coordinates.
+        
+        Args:
+            kml_file_path: Path to the KML file
+            
+        Returns:
+            List of (latitude, longitude) tuples representing the flight plan route
+        """
+        try:
+            # Parse the KML file
+            tree = ET.parse(kml_file_path)
+            root = tree.getroot()
+            
+            # Define the namespace
+            namespace = {'kml': 'http://www.opengis.net/kml/2.2'}
+            
+            # Find all LineString elements which contain the flight path
+            coordinates_elements = root.findall('.//kml:LineString/kml:coordinates', namespace)
+            
+            waypoints = []
+            for coord_element in coordinates_elements:
+                # KML coordinates are in lon,lat,alt format
+                coord_text = coord_element.text.strip()
+                for point in coord_text.split():
+                    parts = point.split(',')
+                    if len(parts) >= 2:
+                        lon, lat = float(parts[0]), float(parts[1])
+                        waypoints.append((lat, lon))  # Note: tkintermapview uses (lat, lon) order
+            
+            return waypoints
+        except Exception as e:
+            print(f"Error parsing KML file: {e}")
+            return []
+
+    def draw_flight_plan(self, waypoints):
+        """
+        Draw the flight plan on the map.
+        
+        Args:
+            waypoints: List of (latitude, longitude) tuples
+        """
+        if not waypoints:
+            return
+            
+        # Create a path with the waypoints
+        self.flight_plan_path = self.map_widget.set_path(waypoints, 
+                                                        width=3,
+                                                        color="#3080FF")
+                                                        
+        # Fit the map to show the entire flight plan
+        if self.follow_aircraft:
+            # If following aircraft, don't zoom out to fit flight plan
+            pass
+        else:
+            # Otherwise, fit the map to show the entire flight plan
+            self.map_widget.fit_bounds(waypoints)
+
+    def toggle_flight_plan_display(self):
+        """Toggle the display of the flight plan on the map."""
+        show_plan = self.show_flightplan_var.get()
+        
+        if hasattr(self, 'flight_plan_path') and self.flight_plan_path:
+            # Remove existing path
+            self.flight_plan_path.delete()
+            self.flight_plan_path = None
+            
+        if show_plan and hasattr(self, 'flight_plan_waypoints') and self.flight_plan_waypoints:
+            # Redraw the path
+            self.draw_flight_plan(self.flight_plan_waypoints)
+
     def setup_recording_controls(self):
         """Set up modern recording controls."""
         # Create a frame for recording controls
@@ -749,6 +873,11 @@ class AircraftTrackerApp:
     def close_application(self):
         """Clean up resources and close the application."""
         print("Closing Aircraft Tracker...")
+        
+        # Clean up flight plan path if it exists
+        if hasattr(self, 'flight_plan_path') and self.flight_plan_path:
+            self.flight_plan_path.delete()
+            
         self.udp_receiver.stop()
         self.master.destroy()
 
