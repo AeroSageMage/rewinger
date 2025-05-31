@@ -82,6 +82,7 @@ class UDPReceiver:
         self.armed_for_recording: bool = False
         self.csv_files = {}
         self.simulator_name: str = "Unknown"
+        self.simulator_name_set: bool = False
 
 
     def start_receiving(self) -> None:
@@ -103,14 +104,24 @@ class UDPReceiver:
                 self.last_receive_time = time.time()
                 message = data.decode('utf-8')
                 
-                # Extract simulator name from any message type
-                if ',' in message:
-                    parts = message.split(',', 1)
-                    if len(parts) > 1:
-                        # Extract simulator name from between message type and first comma
-                        msg_type = parts[0]
-                        if len(msg_type) > 4:  # If there's text after the message type
-                            self.simulator_name = msg_type[4:]  # Remove XGPS/XATT/etc prefix
+                # Extract simulator name only from standard ForeFlight UDP messages
+                if not self.simulator_name_set and ',' in message:
+                    # Check for standard ForeFlight message types
+                    if message.startswith(('XGPS', 'XATT', 'XTRAFFIC')):
+                        parts = message.split(',', 1)
+                        if len(parts) > 1:
+                            msg_type = parts[0]
+                            # Extract simulator name after the standard prefix
+                            if msg_type.startswith('XGPS'):
+                                self.simulator_name = msg_type[4:]
+                            elif msg_type.startswith('XATT'):
+                                self.simulator_name = msg_type[4:]
+                            elif msg_type.startswith('XTRAFFIC'):
+                                self.simulator_name = msg_type[8:]
+                            
+                            if self.simulator_name:  # Only set if we found a name
+                                self.simulator_name_set = True
+                                print(f"Detected simulator: {self.simulator_name}")
                 
                 if message.startswith('XGPS'):
                     self.latest_gps_data = self._parse_gps_data(message)
@@ -754,9 +765,9 @@ class AircraftTrackerApp:
                 # Update existing marker
                 self.traffic_markers[icao].delete()
             
-            # Create new marker
+            # Create new marker with callsign and altitude
             altitude_text = f"{int(data.altitude_ft)}'"
-            marker_text = f"{data.callsign} {altitude_text}"
+            marker_text = f"{data.callsign} {altitude_text}" if data.callsign else altitude_text
             
             self.traffic_markers[icao] = self.map_widget.set_marker(
                 data.latitude, data.longitude,

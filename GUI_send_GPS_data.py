@@ -15,7 +15,7 @@ class GPSDataSenderApp:
     def __init__(self, root):
         self.root = root
         self.root.title("GPS Data Sender")
-        self.root.geometry("700x600")
+        self.root.geometry("700x800")
         self.root.resizable(True, True)
         
         # Variables
@@ -33,6 +33,7 @@ class GPSDataSenderApp:
         self.registration = tk.StringVar(value="N12345")
         self.flight_number = tk.StringVar(value="")
         self.aircraft_id = tk.StringVar(value=self.generate_random_id())
+        self.send_aircraft_info = tk.BooleanVar(value=True)
 
         # UDP settings
         self.udp_ip = tk.StringVar(value="127.0.0.1")
@@ -93,9 +94,18 @@ class GPSDataSenderApp:
         
         ttk.Label(metadata_frame, text="Flight Number:").grid(row=2, column=2, padx=5, pady=2, sticky=tk.W)
         ttk.Entry(metadata_frame, textvariable=self.flight_number, width=15).grid(row=2, column=3, padx=5, pady=2, sticky=tk.W)
+        
+        # Add the toggle checkbox
+        ttk.Checkbutton(
+            metadata_frame, 
+            text="Send XAIRCRAFT Info", 
+            variable=self.send_aircraft_info
+        ).grid(row=4, column=0, columnspan=4, padx=5, pady=2, sticky=tk.W)
+        
         ttk.Label(metadata_frame, text="Aircraft ID:").grid(row=3, column=0, padx=5, pady=2, sticky=tk.W)
         ttk.Entry(metadata_frame, textvariable=self.aircraft_id, width=20).grid(row=3, column=1, padx=5, pady=2, sticky=tk.W)
         ttk.Button(metadata_frame, text="Regenerate", command=lambda: self.aircraft_id.set(self.generate_random_id())).grid(row=3, column=2, padx=5, pady=2, sticky=tk.W)
+        
         # Custom Message section
         custom_msg_frame = ttk.LabelFrame(main_frame, text="Custom UDP Message", padding="5")
         custom_msg_frame.pack(fill=tk.X, padx=5, pady=5)
@@ -218,23 +228,19 @@ class GPSDataSenderApp:
             self.log(f"UDP target: {self.udp_ip.get()}:{self.udp_port.get()}")
             self.log(f"ICAO Address: {icao_address}, Callsign: {callsign}")
             
-            # Send aircraft data message if in traffic mode
-            if self.mode.get().lower() == "traffic":
-                # Send XSageMage aircraft info message
-                aircraft_info = (
-                    f"XAIRCRAFT{simulator_name},{self.aircraft_id.get()},{icao_address},{self.aircraft_type.get()},"
-                    f"{self.registration.get()},{callsign},{self.flight_number.get()}"
-                )
+            # Prepare aircraft info message
+            aircraft_info = (
+                f"XAIRCRAFT{simulator_name},{self.aircraft_id.get()},{icao_address},{self.aircraft_type.get()},"
+                f"{self.registration.get()},{callsign},{self.flight_number.get()}"
+            )
+            
+            # Send aircraft data message if enabled
+            if self.send_aircraft_info.get():
                 sock.sendto(bytes(aircraft_info, "utf-8"), (self.udp_ip.get(), self.udp_port.get()))
                 self.log(f"Sent aircraft info: {aircraft_info}")
             
             # Main sending loop
             line_count = 0
-            aircraft_info = (
-                    f"XAIRCRAFT{simulator_name},{self.aircraft_id.get()},{icao_address},{self.aircraft_type.get()},"
-                    f"{self.registration.get()},{callsign},{self.flight_number.get()}"
-                )
-            print(aircraft_info)
             for i in gps_att_time_data:
                 if not self.sending_active:
                     break
@@ -250,15 +256,17 @@ class GPSDataSenderApp:
                     # XGPS<simulator_name>,<longitude>,<latitude>,<altitude_msl>,<track_true_north>,<groundspeed_m/s>
                     message = f"XGPS{simulator_name},{i[0]},{i[1]},{i[2]},{i[3]},{i[4]}"
                     message2 = f"XATT{simulator_name},{i[5]},{i[6]},{i[7]}"
-                    #message3 = f"XTRAFFIC{simulator_name},{icao_address},{i[1]},{i[0]},{i[2]},0.0,{airborne_flag},{i[5]},{i[4]},{callsign}"
-                    sock.sendto(bytes(aircraft_info, "utf-8"), (self.udp_ip.get(), self.udp_port.get()))
+                    
+                    # Only send aircraft info if enabled
+                    if self.send_aircraft_info.get():
+                        sock.sendto(bytes(aircraft_info, "utf-8"), (self.udp_ip.get(), self.udp_port.get()))
                     sock.sendto(bytes(message, "utf-8"), (self.udp_ip.get(), self.udp_port.get()))
                     sock.sendto(bytes(message2, "utf-8"), (self.udp_ip.get(), self.udp_port.get()))
                 
                 line_count += 1
                 self.root.after(0, lambda msg=f"Line {line_count}: {message}": self.log(msg))
-                #self.root.after(0, lambda msg=f"Line {line_count}: {message2}": self.log(msg))
-                self.root.after(0, lambda msg=f"Line {line_count}: {aircraft_info}": self.log(msg))
+                if self.send_aircraft_info.get():
+                    self.root.after(0, lambda msg=f"Line {line_count}: {aircraft_info}": self.log(msg))
                 
                 # Wait for the next data point
                 time.sleep(float(i[8]))
