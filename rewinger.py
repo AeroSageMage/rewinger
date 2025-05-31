@@ -81,6 +81,7 @@ class UDPReceiver:
         self.log_to_csv: bool = False
         self.armed_for_recording: bool = False
         self.csv_files = {}
+        self.simulator_name: str = "Unknown"
 
 
     def start_receiving(self) -> None:
@@ -101,6 +102,16 @@ class UDPReceiver:
                 data, _ = self.socket.recvfrom(1024)
                 self.last_receive_time = time.time()
                 message = data.decode('utf-8')
+                
+                # Extract simulator name from any message type
+                if ',' in message:
+                    parts = message.split(',', 1)
+                    if len(parts) > 1:
+                        # Extract simulator name from between message type and first comma
+                        msg_type = parts[0]
+                        if len(msg_type) > 4:  # If there's text after the message type
+                            self.simulator_name = msg_type[4:]  # Remove XGPS/XATT/etc prefix
+                
                 if message.startswith('XGPS'):
                     self.latest_gps_data = self._parse_gps_data(message)
                 if message.startswith('XATT'):
@@ -137,11 +148,10 @@ class UDPReceiver:
     @staticmethod
     def _parse_gps_data(message: str) -> Optional[GPSData]:
         """Parse GPS data from the received message."""
-        pattern = r'XGPSAerofly FS 4,([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)'
+        # Match XGPS followed by optional simulator name and data
+        pattern = r'XGPS(?:[^,]+)?,([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)'
         match = re.match(pattern, message)
-        #print(match)
         if match:
-            #print("Received GPS DATA")
             latitude, longitude, altitude, track, ground_speed = map(float, match.groups())
             
             # Check for the specific "menu state" condition
@@ -157,34 +167,27 @@ class UDPReceiver:
     @staticmethod
     def _parse_attitude_data(message: str) -> Optional[AttitudeData]:
         """Parse attitude data from the received message."""
-        pattern = r'XATTAerofly FS 4,([-\d.]+),([-\d.]+),([-\d.]+)'
+        pattern = r'XATT(?:[^,]+)?,([-\d.]+),([-\d.]+),([-\d.]+)'
         match = re.match(pattern, message)
         if match:
-            #print("Received ATTITUDE DATA")
             return AttitudeData(*map(float, match.groups()))
         return None
     @staticmethod
     def _parse_aircraft_data(message: str) -> Optional[AircraftData]:
         """Parse Aircraft data from the received message."""
-        #print(message)
-        pattern = r'^XAIRCRAFTAerofly FS 4,([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+)'
+        pattern = r'^XAIRCRAFT(?:[^,]+)?,([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+),([A-Za-z0-9\-_]+)'
         match = re.match(pattern, message)
         if match:
-            #print("Received Aircraft Data")
             return AircraftData(*map(str, match.groups()))
         return None
     @staticmethod
     def _parse_traffic_data(message: str) -> Optional[AirTrafficData]:
         """Parse traffic data from the received message."""
-        pattern = r'^XTRAFFICAerofly FS 4,([A-Za-z0-9\-_]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([01]),'\
+        pattern = r'^XTRAFFIC(?:[^,]+)?,([A-Za-z0-9\-_]+),([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+),([01]),'\
                 r'([-\d.]+),([-\d.]+),([A-Za-z0-9\-_]+)'
         match = re.match(pattern, message)
-        #print(message)
         if match:
-            #print("Received TRAFFFIC DATA")
             groups = match.groups()
-            #print(groups)
-            # Convert strings to appropriate data types
             return AirTrafficData(
                 icao_address=str(groups[0]),
                 latitude=float(groups[1]),
@@ -796,7 +799,7 @@ class AircraftTrackerApp:
                 gps_data.latitude, gps_data.longitude,
                 icon=self.rotated_image,
                 icon_anchor="center",
-                text="Aerofly FS 4"
+                text=self.udp_receiver.simulator_name
             )
         
         # Center map on aircraft if follow mode is enabled
