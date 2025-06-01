@@ -113,6 +113,8 @@ XAIRCRAFT<simulator_name>,<aircraft_id>,<icao_address>,<aircraft_type>,<registra
 4. Implement message compression for high-frequency updates
 5. Add support for weather data transmission
 6. Implement message acknowledgment system
+7. Additional field for Radio status and frequency
+8. Additional field for TCAS status and squawk code
 
 ## Contributing
 
