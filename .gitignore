@@ -1,4 +1,6 @@
 .DS_Store
+.vscode
+*.code-workspace
 /output_recorder
 /__pycache__
 output_ATTITUDE_DATA_20250418-115327.csv

@@ -81,6 +81,26 @@ XAIRCRAFT<simulator_name>,<aircraft_id>,<icao_address>,<aircraft_type>,<registra
 - `callsign`: Aircraft callsign
 - `flight_number`: Flight number (optional)
 
+## Custom XCOM Extension
+
+The XCOM message is a custom extension developed for the rewinger/SkyBridge project to provide additional the state of the aircraft's communication and transponder settings.
+
+#### XCOM Message
+Used to transmit aircraft COM / XPDR settings. Send COM/Transponder packets at 1Hz (once per second):
+
+```csv
+XCOM<simulator_name>,<com1_frequency>,<com1_transmitter>,<com2_frequency>,<com2_transmitter>,<transponder_code>,<transponder_ident>,<transponder_mode>
+```
+
+**Fields:**
+
+- `simulator_name`: Simulator Name/ID (short identifier)
+- `com1_frequency` / `com2_frequency`: COM1/2 Frequency (decimal, up to 3 decimals, send 0.0 if radio cannot be listened to right now)
+- `com1_transmitter` / `com2_transmitter`: COM1/2 is transmitting device (1 if this radio is set to be transmitting, 0 if not)
+- `transponder_code`: Transponder code (4 octal digits interpreted as string; if it does not match this pattern assume transponder is deactivated / broken)
+- `transponder_ident`: Transponder ident (1 if ident is activated on transponder, 0 if not)
+- `transponder_mode`: Transponder mode ("A", "C", or "S", even though more modes may exist; send "0" to show that transponder is not sending)
+
 ## Implementation Notes
 
 1. All messages are sent as UTF-8 encoded strings over UDP
@@ -103,6 +123,9 @@ XAIRCRAFT<simulator_name>,<aircraft_id>,<icao_address>,<aircraft_type>,<registra
 
 # Example XATT message (ForeFlight Protocol)
 "XATTAerofly FS 4,270,0,0"
+
+# Example XCOM message (ForeFlight Protocol)
+"XCOMAerofly FS,124.025,1,119.675,7000,0,C"
 ```
 
 ## Future Considerations
@@ -113,8 +136,7 @@ XAIRCRAFT<simulator_name>,<aircraft_id>,<icao_address>,<aircraft_type>,<registra
 4. Implement message compression for high-frequency updates
 5. Add support for weather data transmission
 6. Implement message acknowledgment system
-7. Additional field for Radio status and frequency
-8. Additional field for TCAS status and squawk code
+8. Additional field for TCAS status
 
 ## Contributing
 
